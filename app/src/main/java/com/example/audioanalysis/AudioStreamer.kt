@@ -6,11 +6,15 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Base64
 import android.util.Log
+import com.example.audioanalysis.ml.AudioProcessor
 import okhttp3.*
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-class AudioStreamer(private val webSocketUrl: String) {
+class AudioStreamer(
+    private val webSocketUrl: String,
+    private var mlProcessor: AudioProcessor? = null
+) {
     private var client: OkHttpClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
@@ -44,6 +48,7 @@ class AudioStreamer(private val webSocketUrl: String) {
                 isConnected = true
                 Log.d("AudioStreamer", "WebSocket Connected. Waiting for server signal...")
                 listener?.onConnected()
+                startRecording()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -121,14 +126,33 @@ class AudioStreamer(private val webSocketUrl: String) {
                 if (read > 0) {
                     val data = if (read < buffer.size) buffer.copyOfRange(0, read) else buffer
                     val base64Data = Base64.encodeToString(data, Base64.NO_WRAP)
-                    
+
                     val audioPayload = JSONObject().apply {
                         put("action", "sendAudioChunk") // Updated to match AWS Route name
                         put("data", base64Data)
+
+                        // Add acoustic events if ML detected any
+                        mlProcessor?.getPendingEvents()?.let { events ->
+                            if (events.isNotEmpty()) {
+                                val eventsArray = org.json.JSONArray()
+                                events.forEach { classified ->
+                                    eventsArray.put(JSONObject().apply {
+                                        put("event", classified.type.name.lowercase())
+                                        put("confidence", classified.event.confidence)
+                                        put("timestamp", classified.event.timestamp)
+                                    })
+                                }
+                                put("acoustic_events", eventsArray)
+                                Log.d("AudioStreamer", "Added ${events.size} acoustic events to payload")
+                            }
+                        }
                     }
                     val payloadString = audioPayload.toString()
                     Log.d("AudioStreamer", "Streaming ${data.size} bytes: $payloadString")
                     webSocket?.send(payloadString)
+
+                    // Pass audio to ML processor if present (modular - optional)
+                    mlProcessor?.processChunk(data)
                 }
             }
         }.start()
