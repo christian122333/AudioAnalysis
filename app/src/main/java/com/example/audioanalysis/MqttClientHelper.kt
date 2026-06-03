@@ -59,4 +59,18 @@ class MqttClientHelper(
             e.printStackTrace()
         }
     }
+
+    fun publish(topic: String, message: String, qos: Int = 1) {
+        try {
+            val mqttMessage = MqttMessage(message.toByteArray()).apply {
+                this.qos = qos
+                isRetained = false
+            }
+            mqttClient?.publish(topic, mqttMessage)
+            Log.d("MqttHelper", "Published to $topic: $message")
+        } catch (e: MqttException) {
+            Log.e("MqttHelper", "Publish error: ${e.message}")
+            listener?.onError("Failed to publish: ${e.message}")
+        }
+    }
 }

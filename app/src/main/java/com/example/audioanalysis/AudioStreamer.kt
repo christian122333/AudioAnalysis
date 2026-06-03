@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.*
 import android.util.Base64
 import android.util.Log
+import com.example.audioanalysis.ml.AudioProcessor
 import okhttp3.*
 import okio.ByteString
 import org.json.JSONObject
@@ -31,7 +32,11 @@ private fun b64encode(params: IntArray): String? {
     return Base64.encodeToString(bparams, Base64.NO_WRAP)
 }
 
-class AudioStreamer(private val context: Context, private val webSocketUrl: String) {
+class AudioStreamer(
+    private val context: Context,
+    private val webSocketUrl: String,
+    private var mlProcessor: AudioProcessor? = null
+) {
     private var client: OkHttpClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
@@ -157,6 +162,7 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
                 sendToWebSocket(initPayload.toString())
 
                 listener?.onConnected()
+                startRecording()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -286,9 +292,28 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
 
                     val audioPayload = JSONObject().apply {
                         put("action", "sendAudioChunk") // Updated to match AWS Route name
-                        put("audio_base64", base64Data)
+                        put("data", base64Data)
+
+                        // Add acoustic events if ML detected any
+                        mlProcessor?.getPendingEvents()?.let { events ->
+                            if (events.isNotEmpty()) {
+                                val eventsArray = org.json.JSONArray()
+                                events.forEach { classified ->
+                                    eventsArray.put(JSONObject().apply {
+                                        put("event", classified.type.name.lowercase())
+                                        put("confidence", classified.event.confidence)
+                                        put("timestamp", classified.event.timestamp)
+                                    })
+                                }
+                                put("acoustic_events", eventsArray)
+                                Log.d("AudioStreamer", "Added ${events.size} acoustic events to payload")
+                            }
+                        }
                     }
                     sendToWebSocket(audioPayload.toString())
+
+                    // Pass audio to ML processor if present (modular - optional)
+                    mlProcessor?.processChunk(data)
                 }
             }
         }.start()

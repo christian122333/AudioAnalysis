@@ -20,14 +20,47 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.example.audioanalysis.ml.*
 import com.example.audioanalysis.ui.theme.AudioAnalysisTheme
 
 class MainActivity : ComponentActivity() {
-    private val streamer by lazy { AudioStreamer(applicationContext, "wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production") }
+    // Initialize ML components
+    private val yamnetClassifier by lazy { YamnetClassifier(this) }
+    private val audioProcessor by lazy { AudioProcessor(yamnetClassifier) }
+    private lateinit var mlAlertManager: MLAlertManager
+
     private val mqttHelper = MqttClientHelper("tcp://broker.hivemq.com:1883") // Replace with your AWS IoT endpoint
+
+    // Pass ML processor to streamer (optional parameter)
+    private val streamer = AudioStreamer(
+        applicationContext,
+        "wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production",
+        audioProcessor
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialize ML components
+        yamnetClassifier.initialize()
+        mlAlertManager = MLAlertManager(mqttHelper)
+
+        // Setup ML callbacks
+        audioProcessor.setCallback(object : AudioProcessor.AudioProcessorCallback {
+            override fun onGunshot(event: ClassifiedEvent) {
+                mlAlertManager.publishGunshot(event)
+            }
+
+            override fun onDistressVocal(event: ClassifiedEvent) {
+                // Distress vocals now sent in cloud JSON payload, not MQTT
+                Log.d("MainActivity", "Distress vocal detected: ${event.event.className} (${event.event.confidence})")
+            }
+
+            override fun onClassification(events: List<ClassifiedEvent>) {
+                // Could update UI here if needed
+            }
+        })
+
         enableEdgeToEdge()
         setContent {
             AudioAnalysisTheme {
