@@ -32,10 +32,13 @@ class MainActivity : ComponentActivity() {
     private val mqttHelper = MqttClientHelper("tcp://broker.hivemq.com:1883") // Replace with your AWS IoT endpoint
 
     // Pass ML processor to streamer (optional parameter)
-    private val streamer = AudioStreamer(
-        "wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production",
-        audioProcessor
-    )
+    private val streamer by lazy {
+        AudioStreamer(
+            applicationContext,
+            "wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production",
+            audioProcessor
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
