@@ -2,16 +2,34 @@ package com.example.audioanalysis
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
+import android.media.*
 import android.util.Base64
 import android.util.Log
 import okhttp3.*
+import okio.ByteString
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
+
+val DEFAULT_CONFIG = "MSI_AUDIO_PRI=true;cal_devid=148;cal_apptype=69936;cal_caltype=0;cal_samplerate=16000;cal_topoid=0x00000005;cal_moduleid=0x11111300;cal_paramid=0x11111301;cal_persist=0;cal_data"
+
+private fun b64encode(params: IntArray): String? {
+    if (params.isEmpty()) {
+        return ""
+    }
+    val byteParams = ByteBuffer.allocateDirect(4 * params.size)
+    byteParams.order(ByteOrder.LITTLE_ENDIAN)
+    for (i in params.indices) {
+        byteParams.putInt(params[i])
+    }
+    val bparams = ByteArray(4 * params.size)
+    byteParams.rewind()
+    byteParams.get(bparams)
+    return Base64.encodeToString(bparams, Base64.NO_WRAP)
+}
 
 class AudioStreamer(private val context: Context, private val webSocketUrl: String) {
     private var client: OkHttpClient = OkHttpClient.Builder()
@@ -19,8 +37,10 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
         .build()
     private var webSocket: WebSocket? = null
     private var audioRecord: AudioRecord? = null
+    private var audioTrack: AudioTrack? = null
     private var isStreaming = false
     private var isConnected = false
+    private var soundIdValue = 170
 
     // Local file storage for the session
     private var sessionFile: File? = null
@@ -29,8 +49,8 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
     private val sampleRate = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-    // Use a larger buffer (e.g., 100ms of audio = 3200 bytes) to avoid flooding the API
-    private val bufferSize = maxOf(AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat), 3200)
+    // Use a larger buffer (e.g., 200ms of audio = 6400 bytes) to avoid flooding the API
+    private val bufferSize = maxOf(AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat), 6400)
 
     interface StreamListener {
         fun onConnected()
@@ -44,6 +64,78 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
     private fun sendToWebSocket(text: String) {
         //Log.d("AudioStreamer", "OUTGOING MESSAGE: $text")
         webSocket?.send(text)
+    }
+
+    private fun initAudioTrack() {
+        val outBufferSize = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_STEREO, audioFormat)
+        var lastSoundIdValue = 170
+        //audioTrack?.start()
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        
+        fun updateAudioParameters(value: Int) {
+            val base = b64encode(intArrayOf(value))
+            val paramString = "$DEFAULT_CONFIG=$base"
+            Log.d("AudioStreamer", "Setting audio parameters: $paramString")
+            try {
+                audioManager.setParameters(paramString)
+            } catch (e: Exception) {
+                Log.e("AudioStreamer", "Error setting parameters: ${e.message}")
+            }
+        }
+
+        updateAudioParameters(soundIdValue)
+        lastSoundIdValue = soundIdValue
+        Log.d("AudioStreamer", "number ${soundIdValue}.")
+//        if (lastSoundIdValue != soundIdValue) {
+//            updateAudioParameters(soundIdValue)
+//            lastSoundIdValue = soundIdValue
+//        }
+//
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build())
+            .setAudioFormat(AudioFormat.Builder()
+                .setEncoding(audioFormat)
+                .setSampleRate(sampleRate)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                .build())
+            .setBufferSizeInBytes(outBufferSize)
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .build()
+        //audioTrack?.play()
+
+        Thread {
+            while (isConnected) {
+                if (lastSoundIdValue != soundIdValue) {
+                    updateAudioParameters(soundIdValue)
+                    lastSoundIdValue = soundIdValue
+                    Log.d("AudioStreamer", "inside thread")
+                }
+                Thread.sleep(100)
+            }
+            //audioTrack?.play()
+        }.start()
+        audioTrack?.play()
+    }
+
+    private fun writeToSpeaker(value: Int) {
+        soundIdValue = value
+        //if (audioTrack == null) {
+            initAudioTrack()
+        //}
+        // Write a short burst of the value to the speaker (Right Channel)
+        val burstDurationMs = 100
+        val burstSizeSamples = (sampleRate * burstDurationMs) / 1000
+        // Interleaved stereo: [Left, Right, Left, Right, ...]
+        val buffer = ShortArray(burstSizeSamples * 2) 
+        for (i in 0 until burstSizeSamples) {
+            // Fill both channels to avoid issues with mono/stereo mismatches
+            buffer[i * 2] = soundIdValue.toShort()
+            buffer[i * 2 + 1] = soundIdValue.toShort()
+        }
+        audioTrack?.write(buffer, 0, buffer.size)
     }
 
     @SuppressLint("MissingPermission")
@@ -82,6 +174,14 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
                             //sendHello()
                             startRecording()
                         }
+                    } else if (event == "DANGER_DETECTED") {
+                        Log.d("AudioStreamer", "DANGER DETECTED! Writing 170 to speaker.")
+                        writeToSpeaker(170)
+                        soundIdValue = 170
+                    } else if (event == "SAFE") {
+                        Log.d("AudioStreamer", "SAFE! Writing 204 to speaker.")
+                        writeToSpeaker(204)
+                        soundIdValue = 204
                     } else if (jsonResponse.has("message") && jsonResponse.getString("message") == "Forbidden") {
                         Log.e("AudioStreamer", "SERVER REJECTED MESSAGE (FORBIDDEN). Full Response: $text")
                     }
@@ -91,7 +191,7 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
                 listener?.onMessage(text)
             }
 
-            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 Log.d("AudioStreamer", "RECEIVING BINARY FRAME: ${bytes.hex()}")
             }
 
@@ -161,11 +261,11 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
                             var sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xFF)).toShort()
                             
                             // Apply gain and clip to valid short range
-                            val scaledSample = sample.toInt() * 10
+                            val scaledSample = sample.toInt() * 31.6228
                             sample = when {
                                 scaledSample > Short.MAX_VALUE -> Short.MAX_VALUE
                                 scaledSample < Short.MIN_VALUE -> Short.MIN_VALUE
-                                else -> scaledSample.toShort()
+                                else -> scaledSample.toInt().toShort()
                             }
                             
                             // Convert back to little-endian bytes
@@ -209,6 +309,10 @@ class AudioStreamer(private val context: Context, private val webSocketUrl: Stri
         } catch (e: Exception) {
             Log.e("AudioStreamer", "Error during file cleanup: ${e.message}")
         }
+
+        audioTrack?.stop()
+        audioTrack?.release()
+        audioTrack = null
 
         webSocket?.close(1000, "User stopped streaming")
         webSocket = null
