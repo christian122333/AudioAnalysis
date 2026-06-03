@@ -23,7 +23,7 @@ import androidx.core.content.ContextCompat
 import com.example.audioanalysis.ui.theme.AudioAnalysisTheme
 
 class MainActivity : ComponentActivity() {
-    private val streamer = AudioStreamer("wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production")
+    private val streamer by lazy { AudioStreamer(applicationContext, "wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production") }
     private val mqttHelper = MqttClientHelper("tcp://broker.hivemq.com:1883") // Replace with your AWS IoT endpoint
 
     override fun onCreate(savedInstanceState: Bundle?) {
