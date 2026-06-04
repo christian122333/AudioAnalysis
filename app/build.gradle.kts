@@ -5,16 +5,12 @@ plugins {
 
 android {
     namespace = "com.example.audioanalysis"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.audioanalysis"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -49,7 +45,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.paho.mqtt)
     implementation(libs.tensorflow.lite)
-    implementation(libs.tensorflow.lite.support)
+    implementation(libs.tensorflow.lite.support) {
+        exclude(group = "org.tensorflow", module = "tensorflow-lite-support-api")
+    }
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

@@ -62,7 +62,7 @@ class AudioProcessor(private val classifier: YamnetClassifier) {
             // Process when buffer has enough samples for YAMNet window
             if (audioBuffer.size >= YamnetClassifier.WINDOW_SIZE_SAMPLES) {
                 val window = audioBuffer.take(YamnetClassifier.WINDOW_SIZE_SAMPLES).toShortArray()
-                audioBuffer.removeRange(0, YamnetClassifier.WINDOW_SIZE_SAMPLES)
+                audioBuffer.subList(0, YamnetClassifier.WINDOW_SIZE_SAMPLES).clear()
 
                 // Run classification in background to avoid blocking audio thread
                 Thread {

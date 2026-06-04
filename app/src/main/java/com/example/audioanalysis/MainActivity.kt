@@ -25,18 +25,20 @@ import com.example.audioanalysis.ui.theme.AudioAnalysisTheme
 
 class MainActivity : ComponentActivity() {
     // Initialize ML components
-    private val yamnetClassifier by lazy { YamnetClassifier(this) }
+    private val yamnetClassifier by lazy { YamnetClassifier(applicationContext) }
     private val audioProcessor by lazy { AudioProcessor(yamnetClassifier) }
     private lateinit var mlAlertManager: MLAlertManager
 
     private val mqttHelper = MqttClientHelper("tcp://broker.hivemq.com:1883") // Replace with your AWS IoT endpoint
 
     // Pass ML processor to streamer (optional parameter)
-    private val streamer = AudioStreamer(
-        applicationContext,
-        "wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production",
-        audioProcessor
-    )
+    private val streamer by lazy {
+        AudioStreamer(
+            applicationContext,
+            "wss://1m36b07xi1.execute-api.us-east-2.amazonaws.com/production",
+            audioProcessor
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +51,9 @@ class MainActivity : ComponentActivity() {
         audioProcessor.setCallback(object : AudioProcessor.AudioProcessorCallback {
             override fun onGunshot(event: ClassifiedEvent) {
                 mlAlertManager.publishGunshot(event)
+                // Trigger audio feedback on device
+                streamer.writeToSpeaker(170)
+                streamer.soundIdValue = 170
             }
 
             override fun onDistressVocal(event: ClassifiedEvent) {

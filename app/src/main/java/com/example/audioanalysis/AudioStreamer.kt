@@ -45,7 +45,7 @@ class AudioStreamer(
     private var audioTrack: AudioTrack? = null
     private var isStreaming = false
     private var isConnected = false
-    private var soundIdValue = 170
+    var soundIdValue = 170
 
     // Local file storage for the session
     private var sessionFile: File? = null
@@ -125,7 +125,7 @@ class AudioStreamer(
         audioTrack?.play()
     }
 
-    private fun writeToSpeaker(value: Int) {
+    fun writeToSpeaker(value: Int) {
         soundIdValue = value
         //if (audioTrack == null) {
             initAudioTrack()
@@ -292,7 +292,7 @@ class AudioStreamer(
 
                     val audioPayload = JSONObject().apply {
                         put("action", "sendAudioChunk") // Updated to match AWS Route name
-                        put("data", base64Data)
+                        put("audio_base64", base64Data)
 
                         // Add acoustic events if ML detected any
                         mlProcessor?.getPendingEvents()?.let { events ->
